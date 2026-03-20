@@ -28,10 +28,13 @@ function DrawnX({ position, isWin }) {
     }
 
     // Stroke 2: top-right → bottom-left, draws during p 0.5→1
-    if (line2Ref.current) {
-      const t2 = Math.max(0, Math.min(1, (p - 0.5) / 0.5));
-      line2Ref.current.visible = p > 0.5;
-      if (p > 0.5 && line2Ref.current.geometry?.setPositions) {
+    // Keep geometry at start point (invisible) until phase begins — avoids
+    // the React-prop visibility reset bug on re-renders
+    if (line2Ref.current?.geometry?.setPositions) {
+      if (p <= 0.5) {
+        line2Ref.current.geometry.setPositions([s, 0, -s, s + 0.0001, 0, -s + 0.0001]);
+      } else {
+        const t2 = (p - 0.5) / 0.5;
         line2Ref.current.geometry.setPositions([
           s, 0, -s,
           s - 2 * s * t2, 0, -s + 2 * s * t2,
@@ -54,8 +57,8 @@ function DrawnX({ position, isWin }) {
         points={[[-s, 0, -s], [-s + 0.001, 0, -s + 0.001]]}
         color={color} lineWidth={4} />
       <Line ref={line2Ref}
-        points={[[s, 0, -s], [s - 0.001, 0, -s + 0.001]]}
-        color={color} lineWidth={4} visible={false} />
+        points={[[s, 0, -s], [s + 0.0001, 0, -s + 0.0001]]}
+        color={color} lineWidth={4} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.005, 0]}>
         <planeGeometry args={[0.55, 0.55]} />
         <meshBasicMaterial color={color} transparent opacity={isWin ? 0.12 : 0.05} />
@@ -145,7 +148,7 @@ function WinLineBeam({ winLine }) {
 }
 
 // ── 6-Axis Robot Arm with full IK ───────────────────────────
-function RobotArm3D({ targetCell, isMoving, isDrawing, drawSymbol }) {
+function RobotArm3D({ targetCell, isMoving, isDrawing, drawSymbol, onArmArrived, onArmAtHome }) {
   const ARM_BASE = useMemo(() => new THREE.Vector3(1.8, 0, 0), []);
   const L1 = 1.5;   // upper arm
   const L2 = 1.2;   // forearm
@@ -164,6 +167,19 @@ function RobotArm3D({ targetCell, isMoving, isDrawing, drawSymbol }) {
   // Drawing stroke size — matches DrawnX/DrawnO dimensions
   const DRAW_S = 0.20;
   const DRAW_R = 0.20;
+
+  // Arrival / home detection
+  const arrivedFiredRef = useRef(false);
+  const homeFiredRef    = useRef(true);   // arm starts at home
+  const homePos = useMemo(() => new THREE.Vector3(2.1, 0.6, 0.3), []);
+
+  // Reset arrival flag whenever a new target cell is assigned
+  useEffect(() => {
+    if (targetCell !== null && targetCell !== undefined) {
+      arrivedFiredRef.current = false;
+      homeFiredRef.current    = false;
+    }
+  }, [targetCell]);
 
   useEffect(() => {
     if (isDrawing) {
@@ -250,6 +266,25 @@ function RobotArm3D({ targetCell, isMoving, isDrawing, drawSymbol }) {
     const ikLerpSpeed = Math.min(1, delta * 2);
     currentShoulder.current += (shoulderAngle - currentShoulder.current) * ikLerpSpeed;
     currentElbow.current    += (elbowAngle    - currentElbow.current)    * ikLerpSpeed;
+
+    // ── Arrival detection: fire once when arm reaches the target cell ──
+    if (!arrivedFiredRef.current && !isDrawing &&
+        targetCell !== null && targetCell !== undefined) {
+      const dist = currentTarget.current.distanceTo(desiredTarget.current);
+      if (dist < 0.06) {
+        arrivedFiredRef.current = true;
+        onArmArrived?.();
+      }
+    }
+
+    // ── Home detection: fire once when arm returns to rest position ──
+    if (!homeFiredRef.current && targetCell === null) {
+      const distHome = currentTarget.current.distanceTo(homePos);
+      if (distHome < 0.10) {
+        homeFiredRef.current = true;
+        onArmAtHome?.();
+      }
+    }
   });
 
   const baseMat = useMemo(() => new THREE.MeshStandardMaterial({
@@ -551,7 +586,9 @@ function CameraRig() {
 // ── Main Scene ──────────────────────────────────────────────
 export default function Scene3D({
   board, winLine, onCellClick, currentPlayer, gameResult,
-  robotTarget, isArmMoving, isDrawing, drawSymbol, isScanning, showVision, hoverEnabled
+  robotTarget, isArmMoving, isDrawing, drawSymbol,
+  onArmArrived, onArmAtHome,
+  isScanning, showVision, hoverEnabled
 }) {
   return (
     <Canvas
@@ -597,7 +634,11 @@ export default function Scene3D({
         hoverEnabled={hoverEnabled}
       />
 
-      <RobotArm3D targetCell={robotTarget} isMoving={isArmMoving} isDrawing={isDrawing} drawSymbol={drawSymbol} />
+      <RobotArm3D
+        targetCell={robotTarget} isMoving={isArmMoving}
+        isDrawing={isDrawing} drawSymbol={drawSymbol}
+        onArmArrived={onArmArrived} onArmAtHome={onArmAtHome}
+      />
 
       {showVision && <VisionScan active={isScanning} />}
     </Canvas>

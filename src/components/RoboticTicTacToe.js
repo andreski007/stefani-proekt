@@ -45,6 +45,7 @@ export default function RoboticTicTacToe() {
   // Processing flag
   const processingRef = useRef(false);
   const timersRef = useRef([]);
+  const pendingMoveRef = useRef(null);   // { idx, symbol, board } waiting for arm callbacks
 
   const addLog = useCallback((msg) => {
     setLog(prev => [...prev.slice(-24), { t: Date.now(), msg }]);
@@ -67,68 +68,79 @@ export default function RoboticTicTacToe() {
 
   const processMove = useCallback((idx, symbol, currentBoard) => {
     processingRef.current = true;
+    pendingMoveRef.current = { idx, symbol, board: [...currentBoard] };
     setRobotTarget(idx);
     setIsArmMoving(true);
 
     const prefix = isPvP ? '[PVP]' : '[ARM]';
     addLog(`${prefix} ${symbol} → cell [${Math.floor(idx / 3)},${idx % 3}]`);
+    // Drawing starts when onArmArrived fires (arm physically reaches the cell)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPvP, addLog]);
 
-    const TRAVEL_MS = 700;   // arm travels to cell
-    const DRAW_MS   = 800;   // arm draws the symbol
+  // Called by RobotArm3D when the arm tip is close enough to the target cell
+  const handleArmArrived = useCallback(() => {
+    if (!pendingMoveRef.current) return;
+    const { idx, symbol, board } = pendingMoveRef.current;
 
-    // Phase 1: arm arrives, mark appears, drawing animation begins
-    scheduleTimeout(() => {
-      const updated = [...currentBoard];
-      updated[idx] = symbol;
-      setBoard(updated);
-      setIsDrawing(true);
-      setDrawSymbol(symbol);
-      addLog(`[PLACE] ${symbol} placed at [${Math.floor(idx / 3)},${idx % 3}]`);
-    }, TRAVEL_MS);
+    const updated = [...board];
+    updated[idx] = symbol;
+    setBoard(updated);
+    setIsDrawing(true);
+    setDrawSymbol(symbol);
+    addLog(`[PLACE] ${symbol} placed at [${Math.floor(idx / 3)},${idx % 3}]`);
 
-    // Phase 2: drawing complete, process game state
+    // After drawing finishes, clear drawing state and send arm home
     scheduleTimeout(() => {
       setIsDrawing(false);
-      setIsArmMoving(false);
       setIsScanning(false);
       setVisionStage(VISION_STAGE.IDLE);
+      setRobotTarget(null);   // arm starts returning home → triggers onArmAtHome
+    }, 800);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addLog, scheduleTimeout]);
 
-      const updated = [...currentBoard];
-      updated[idx] = symbol;
+  // Called by RobotArm3D when the arm has returned to its rest / home position
+  const handleArmAtHome = useCallback(() => {
+    if (!pendingMoveRef.current) return;
+    const { idx, symbol, board } = pendingMoveRef.current;
+    pendingMoveRef.current = null;
 
-      // Check game end
-      const result = evaluateBoard(updated);
-      if (result.winner) {
-        setGameResult(result.winner);
-        setWinLine(result.line);
-        setRobotTarget(null);
+    setIsArmMoving(false);
 
-        if (result.winner === 'draw') {
-          addLog('[GAME] Draw — no moves remaining');
-          setScores(s => ({ ...s, draws: s.draws + 1 }));
-        } else {
-          const name = result.winner === X_PLAYER ? p1Name : p2Name;
-          addLog(`[GAME] ${name} (${result.winner}) wins!`);
-          setScores(s => ({
-            ...s,
-            [result.winner === X_PLAYER ? 'x' : 'o']: s[result.winner === X_PLAYER ? 'x' : 'o'] + 1
-          }));
-        }
-        processingRef.current = false;
-        return;
-      }
+    const updated = [...board];
+    updated[idx] = symbol;
 
-      // Next turn
-      const next = symbol === X_PLAYER ? O_PLAYER : X_PLAYER;
-      setCurrentPlayer(next);
+    // Check game end
+    const result = evaluateBoard(updated);
+    if (result.winner) {
+      setGameResult(result.winner);
+      setWinLine(result.line);
 
-      if ((isPvP === false || isAuto) && ((isAuto) || (next === robotSymbol))) {
-        scheduleTimeout(() => runVisionPipeline(updated, next), 400);
+      if (result.winner === 'draw') {
+        addLog('[GAME] Draw — no moves remaining');
+        setScores(s => ({ ...s, draws: s.draws + 1 }));
       } else {
-        setRobotTarget(null);
-        processingRef.current = false;
+        const name = result.winner === X_PLAYER ? p1Name : p2Name;
+        addLog(`[GAME] ${name} (${result.winner}) wins!`);
+        setScores(s => ({
+          ...s,
+          [result.winner === X_PLAYER ? 'x' : 'o']: s[result.winner === X_PLAYER ? 'x' : 'o'] + 1
+        }));
       }
-    }, TRAVEL_MS + DRAW_MS);
+      processingRef.current = false;
+      return;
+    }
+
+    // Next turn
+    const next = symbol === X_PLAYER ? O_PLAYER : X_PLAYER;
+    setCurrentPlayer(next);
+
+    if ((isPvP === false || isAuto) && ((isAuto) || (next === robotSymbol))) {
+      scheduleTimeout(() => runVisionPipeline(updated, next), 200);
+    } else {
+      processingRef.current = false;
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPvP, isAuto, robotSymbol, addLog, p1Name, p2Name, scheduleTimeout]);
 
@@ -215,6 +227,7 @@ export default function RoboticTicTacToe() {
     timersRef.current = [];
 
     processingRef.current = false;
+    pendingMoveRef.current = null;
     setBoard(Array(9).fill(EMPTY));
     setCurrentPlayer(X_PLAYER);
     setGameResult(null);
@@ -237,6 +250,7 @@ export default function RoboticTicTacToe() {
     timersRef.current = [];
 
     processingRef.current = false;
+    pendingMoveRef.current = null;
     setGameMode(newMode);
     setBoard(Array(9).fill(EMPTY));
     setCurrentPlayer(X_PLAYER);
@@ -402,6 +416,8 @@ export default function RoboticTicTacToe() {
               isArmMoving={isArmMoving}
               isDrawing={isDrawing}
               drawSymbol={drawSymbol}
+              onArmArrived={handleArmArrived}
+              onArmAtHome={handleArmAtHome}
               isScanning={isScanning}
               showVision={showVision}
               hoverEnabled={hoverEnabled}
