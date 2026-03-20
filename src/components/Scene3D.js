@@ -14,7 +14,7 @@ function DrawnX({ position, isWin }) {
 
   useFrame((_, delta) => {
     if (progressRef.current < 1) {
-      progressRef.current = Math.min(1, progressRef.current + delta * 1.25);
+      progressRef.current = Math.min(1, progressRef.current + delta * 1.6);
     }
     const p = progressRef.current;
 
@@ -91,7 +91,7 @@ function DrawnO({ position, isWin }) {
 
   useFrame((_, delta) => {
     if (progressRef.current < 1) {
-      progressRef.current = Math.min(1, progressRef.current + delta * 1.25);
+      progressRef.current = Math.min(1, progressRef.current + delta * 1.6);
     }
     const p = progressRef.current;
 
@@ -205,7 +205,7 @@ function RobotArm3D({ targetCell, isMoving, isDrawing, drawSymbol, onArmArrived,
   useFrame((_, delta) => {
     // When drawing, animate arm tip along the symbol path
     if (isDrawing && targetCell !== null && targetCell !== undefined) {
-      drawPhase.current = Math.min(1, drawPhase.current + delta * 1.25);
+      drawPhase.current = Math.min(1, drawPhase.current + delta * 1.6);
       const { row, col } = getCellPos(targetCell);
       const cx = (col - 1) * 0.75;
       const cz = (row - 1) * 0.75;
@@ -234,8 +234,8 @@ function RobotArm3D({ targetCell, isMoving, isDrawing, drawSymbol, onArmArrived,
       }
     }
 
-    // Lerp faster during drawing so arm tracks the path closely
-    const lerpSpeed = isDrawing ? Math.min(1, delta * 5) : Math.min(1, delta * 1.8);
+    // Travel faster (delta*3) so arm reaches cells in ~0.9s; drawing tracks tightly (delta*5)
+    const lerpSpeed = isDrawing ? Math.min(1, delta * 5) : Math.min(1, delta * 3);
     currentTarget.current.lerp(desiredTarget.current, lerpSpeed);
     const target = currentTarget.current;
 
@@ -267,11 +267,11 @@ function RobotArm3D({ targetCell, isMoving, isDrawing, drawSymbol, onArmArrived,
     currentShoulder.current += (shoulderAngle - currentShoulder.current) * ikLerpSpeed;
     currentElbow.current    += (elbowAngle    - currentElbow.current)    * ikLerpSpeed;
 
-    // ── Arrival detection: fire once when arm reaches the target cell ──
+    // ── Arrival detection: fire once when arm is close enough to the target cell ──
     if (!arrivedFiredRef.current && !isDrawing &&
         targetCell !== null && targetCell !== undefined) {
       const dist = currentTarget.current.distanceTo(desiredTarget.current);
-      if (dist < 0.06) {
+      if (dist < 0.20) {       // generous threshold — arm visually at cell
         arrivedFiredRef.current = true;
         onArmArrived?.();
       }
@@ -280,7 +280,7 @@ function RobotArm3D({ targetCell, isMoving, isDrawing, drawSymbol, onArmArrived,
     // ── Home detection: fire once when arm returns to rest position ──
     if (!homeFiredRef.current && targetCell === null) {
       const distHome = currentTarget.current.distanceTo(homePos);
-      if (distHome < 0.10) {
+      if (distHome < 0.20) {   // matches arrival threshold
         homeFiredRef.current = true;
         onArmAtHome?.();
       }

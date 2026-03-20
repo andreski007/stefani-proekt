@@ -45,7 +45,8 @@ export default function RoboticTicTacToe() {
   // Processing flag
   const processingRef = useRef(false);
   const timersRef = useRef([]);
-  const pendingMoveRef = useRef(null);   // { idx, symbol, board } waiting for arm callbacks
+  const pendingMoveRef = useRef(null);      // { idx, symbol, board } waiting for arm callbacks
+  const runVisionPipelineRef = useRef(null); // always points to latest runVisionPipeline
 
   const addLog = useCallback((msg) => {
     setLog(prev => [...prev.slice(-24), { t: Date.now(), msg }]);
@@ -96,7 +97,7 @@ export default function RoboticTicTacToe() {
       setIsScanning(false);
       setVisionStage(VISION_STAGE.IDLE);
       setRobotTarget(null);   // arm starts returning home → triggers onArmAtHome
-    }, 800);
+    }, 750);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addLog, scheduleTimeout]);
 
@@ -137,11 +138,10 @@ export default function RoboticTicTacToe() {
     setCurrentPlayer(next);
 
     if ((isPvP === false || isAuto) && ((isAuto) || (next === robotSymbol))) {
-      scheduleTimeout(() => runVisionPipeline(updated, next), 200);
+      scheduleTimeout(() => runVisionPipelineRef.current(updated, next), 200);
     } else {
       processingRef.current = false;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPvP, isAuto, robotSymbol, addLog, p1Name, p2Name, scheduleTimeout]);
 
   // ── Vision pipeline: Camera → Process → Detect → AI ──
@@ -206,6 +206,9 @@ export default function RoboticTicTacToe() {
       }, 800);
     }, 500);
   }, [addLog, gameMode, isAuto, processMove, scheduleTimeout]);
+
+  // Keep ref always pointing at the latest version so handleArmAtHome never uses a stale closure
+  runVisionPipelineRef.current = runVisionPipeline;
 
   // ── Human click ───────────────────────────────────────
 
