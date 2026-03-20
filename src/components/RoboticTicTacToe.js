@@ -26,6 +26,8 @@ export default function RoboticTicTacToe() {
   // Robot state
   const [robotTarget, setRobotTarget] = useState(null);
   const [isArmMoving, setIsArmMoving] = useState(false);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [drawSymbol, setDrawSymbol] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const [showVision, setShowVision] = useState(true);
   const [bestMove, setBestMove] = useState(-1);
@@ -71,16 +73,28 @@ export default function RoboticTicTacToe() {
     const prefix = isPvP ? '[PVP]' : '[ARM]';
     addLog(`${prefix} ${symbol} → cell [${Math.floor(idx / 3)},${idx % 3}]`);
 
-    const delay = isPvP ? 200 : 500;
+    const TRAVEL_MS = 700;   // arm travels to cell
+    const DRAW_MS   = 800;   // arm draws the symbol
 
+    // Phase 1: arm arrives, mark appears, drawing animation begins
     scheduleTimeout(() => {
       const updated = [...currentBoard];
       updated[idx] = symbol;
       setBoard(updated);
+      setIsDrawing(true);
+      setDrawSymbol(symbol);
+      addLog(`[PLACE] ${symbol} placed at [${Math.floor(idx / 3)},${idx % 3}]`);
+    }, TRAVEL_MS);
+
+    // Phase 2: drawing complete, process game state
+    scheduleTimeout(() => {
+      setIsDrawing(false);
       setIsArmMoving(false);
       setIsScanning(false);
       setVisionStage(VISION_STAGE.IDLE);
-      addLog(`[PLACE] ${symbol} placed at [${Math.floor(idx / 3)},${idx % 3}]`);
+
+      const updated = [...currentBoard];
+      updated[idx] = symbol;
 
       // Check game end
       const result = evaluateBoard(updated);
@@ -114,7 +128,7 @@ export default function RoboticTicTacToe() {
         setRobotTarget(null);
         processingRef.current = false;
       }
-    }, delay);
+    }, TRAVEL_MS + DRAW_MS);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPvP, isAuto, robotSymbol, addLog, p1Name, p2Name, scheduleTimeout]);
 
@@ -207,6 +221,8 @@ export default function RoboticTicTacToe() {
     setWinLine(null);
     setRobotTarget(null);
     setIsArmMoving(false);
+    setIsDrawing(false);
+    setDrawSymbol(null);
     setIsScanning(false);
     setBestMove(-1);
     setVisionStage(VISION_STAGE.IDLE);
@@ -228,6 +244,8 @@ export default function RoboticTicTacToe() {
     setWinLine(null);
     setRobotTarget(null);
     setIsArmMoving(false);
+    setIsDrawing(false);
+    setDrawSymbol(null);
     setIsScanning(false);
     setBestMove(-1);
     setVisionStage(VISION_STAGE.IDLE);
@@ -382,6 +400,8 @@ export default function RoboticTicTacToe() {
               gameResult={gameResult}
               robotTarget={robotTarget}
               isArmMoving={isArmMoving}
+              isDrawing={isDrawing}
+              drawSymbol={drawSymbol}
               isScanning={isScanning}
               showVision={showVision}
               hoverEnabled={hoverEnabled}

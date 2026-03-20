@@ -4,42 +4,58 @@ import { OrbitControls, RoundedBox, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { EMPTY, X_PLAYER, O_PLAYER, getCellPos } from './gameLogic';
 
-// ── Flat drawn X mark (two crossed lines on the board surface) ──
+// ── Flat drawn X mark — strokes drawn one by one ────────────
 function DrawnX({ position, isWin }) {
   const groupRef = useRef();
+  const line1Ref = useRef();
+  const line2Ref = useRef();
   const progressRef = useRef(0);
+  const s = 0.22;
 
   useFrame((_, delta) => {
     if (progressRef.current < 1) {
-      progressRef.current = Math.min(1, progressRef.current + delta * 5);
-      if (groupRef.current) {
-        groupRef.current.scale.setScalar(progressRef.current);
-        groupRef.current.position.y = position[1] + (1 - progressRef.current) * 0.05;
+      progressRef.current = Math.min(1, progressRef.current + delta * 1.25);
+    }
+    const p = progressRef.current;
+
+    // Stroke 1: top-left → bottom-right, draws during p 0→0.5
+    if (line1Ref.current?.geometry?.setPositions) {
+      const t1 = Math.min(1, p / 0.5);
+      line1Ref.current.geometry.setPositions([
+        -s, 0, -s,
+        -s + 2 * s * t1, 0, -s + 2 * s * t1,
+      ]);
+    }
+
+    // Stroke 2: top-right → bottom-left, draws during p 0.5→1
+    if (line2Ref.current) {
+      const t2 = Math.max(0, Math.min(1, (p - 0.5) / 0.5));
+      line2Ref.current.visible = p > 0.5;
+      if (p > 0.5 && line2Ref.current.geometry?.setPositions) {
+        line2Ref.current.geometry.setPositions([
+          s, 0, -s,
+          s - 2 * s * t2, 0, -s + 2 * s * t2,
+        ]);
       }
     }
-    if (isWin && groupRef.current) {
+
+    // Win pulse after drawing is complete
+    if (isWin && p >= 1 && groupRef.current) {
       const pulse = 1 + Math.sin(Date.now() * 0.006) * 0.06;
       groupRef.current.scale.setScalar(pulse);
     }
   });
 
   const color = isWin ? '#ffd700' : '#ff4d6a';
-  const s = 0.24;
-
-  const line1Points = useMemo(() => [
-    new THREE.Vector3(-s, 0, -s),
-    new THREE.Vector3(s, 0, s),
-  ], [s]);
-
-  const line2Points = useMemo(() => [
-    new THREE.Vector3(s, 0, -s),
-    new THREE.Vector3(-s, 0, s),
-  ], [s]);
 
   return (
-    <group ref={groupRef} position={position} scale={0}>
-      <Line points={line1Points} color={color} lineWidth={4} />
-      <Line points={line2Points} color={color} lineWidth={4} />
+    <group ref={groupRef} position={position}>
+      <Line ref={line1Ref}
+        points={[[-s, 0, -s], [-s + 0.001, 0, -s + 0.001]]}
+        color={color} lineWidth={4} />
+      <Line ref={line2Ref}
+        points={[[s, 0, -s], [s - 0.001, 0, -s + 0.001]]}
+        color={color} lineWidth={4} visible={false} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.005, 0]}>
         <planeGeometry args={[0.55, 0.55]} />
         <meshBasicMaterial color={color} transparent opacity={isWin ? 0.12 : 0.05} />
@@ -48,29 +64,15 @@ function DrawnX({ position, isWin }) {
   );
 }
 
-// ── Flat drawn O mark (circle on the board surface) ─────────
+// ── Flat drawn O mark — arc drawn around the circle ─────────
 function DrawnO({ position, isWin }) {
   const groupRef = useRef();
+  const circleRef = useRef();
   const progressRef = useRef(0);
-
-  useFrame((_, delta) => {
-    if (progressRef.current < 1) {
-      progressRef.current = Math.min(1, progressRef.current + delta * 5);
-      if (groupRef.current) {
-        groupRef.current.scale.setScalar(progressRef.current);
-        groupRef.current.position.y = position[1] + (1 - progressRef.current) * 0.05;
-      }
-    }
-    if (isWin && groupRef.current) {
-      const pulse = 1 + Math.sin(Date.now() * 0.006) * 0.06;
-      groupRef.current.scale.setScalar(pulse);
-    }
-  });
-
-  const color = isWin ? '#ffd700' : '#00d4ff';
   const radius = 0.22;
   const segments = 48;
 
+  // Full circle points — rendered partially via instanceCount
   const circlePoints = useMemo(() => {
     const pts = [];
     for (let i = 0; i <= segments; i++) {
@@ -82,11 +84,32 @@ function DrawnO({ position, isWin }) {
       ));
     }
     return pts;
-  }, [radius, segments]);
+  }, []);
+
+  useFrame((_, delta) => {
+    if (progressRef.current < 1) {
+      progressRef.current = Math.min(1, progressRef.current + delta * 1.25);
+    }
+    const p = progressRef.current;
+
+    // Limit rendered arc segments to show only what's been "drawn" so far
+    if (circleRef.current?.geometry) {
+      const numSegs = Math.max(1, Math.round(p * segments));
+      circleRef.current.geometry.instanceCount = numSegs;
+    }
+
+    // Win pulse after drawing is complete
+    if (isWin && p >= 1 && groupRef.current) {
+      const pulse = 1 + Math.sin(Date.now() * 0.006) * 0.06;
+      groupRef.current.scale.setScalar(pulse);
+    }
+  });
+
+  const color = isWin ? '#ffd700' : '#00d4ff';
 
   return (
-    <group ref={groupRef} position={position} scale={0}>
-      <Line points={circlePoints} color={color} lineWidth={4} />
+    <group ref={groupRef} position={position}>
+      <Line ref={circleRef} points={circlePoints} color={color} lineWidth={4} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.005, 0]}>
         <circleGeometry args={[0.26, 32]} />
         <meshBasicMaterial color={color} transparent opacity={isWin ? 0.1 : 0.04} />
@@ -122,7 +145,7 @@ function WinLineBeam({ winLine }) {
 }
 
 // ── 6-Axis Robot Arm with full IK ───────────────────────────
-function RobotArm3D({ targetCell, isMoving }) {
+function RobotArm3D({ targetCell, isMoving, isDrawing, drawSymbol }) {
   const ARM_BASE = useMemo(() => new THREE.Vector3(1.8, 0, 0), []);
   const L1 = 1.5;   // upper arm
   const L2 = 1.2;   // forearm
@@ -136,22 +159,68 @@ function RobotArm3D({ targetCell, isMoving }) {
   const currentBaseAngle = useRef(0);
   const currentShoulder  = useRef(-0.6);
   const currentElbow     = useRef(-1.2);
+  const drawPhase = useRef(0);
+
+  // Drawing stroke size — matches DrawnX/DrawnO dimensions
+  const DRAW_S = 0.20;
+  const DRAW_R = 0.20;
+
+  useEffect(() => {
+    if (isDrawing) {
+      drawPhase.current = 0;
+    }
+  }, [isDrawing]);
 
   useEffect(() => {
     if (targetCell !== null && targetCell !== undefined) {
-      const { row, col } = getCellPos(targetCell);
-      desiredTarget.current.set(
-        (col - 1) * 0.75,
-        0.12 + L3,          // wrist centre sits L3 above the hover point
-        (row - 1) * 0.75
-      );
+      if (!isDrawing) {
+        const { row, col } = getCellPos(targetCell);
+        desiredTarget.current.set(
+          (col - 1) * 0.75,
+          0.12 + L3,
+          (row - 1) * 0.75
+        );
+      }
     } else {
       desiredTarget.current.set(ARM_BASE.x + 0.3, 0.6, ARM_BASE.z + 0.3);
     }
-  }, [targetCell, ARM_BASE]);
+  }, [targetCell, ARM_BASE, isDrawing]);
 
   useFrame((_, delta) => {
-    currentTarget.current.lerp(desiredTarget.current, Math.min(1, delta * 1.8));
+    // When drawing, animate arm tip along the symbol path
+    if (isDrawing && targetCell !== null && targetCell !== undefined) {
+      drawPhase.current = Math.min(1, drawPhase.current + delta * 1.25);
+      const { row, col } = getCellPos(targetCell);
+      const cx = (col - 1) * 0.75;
+      const cz = (row - 1) * 0.75;
+      const drawY = 0.12 + L3;
+      if (drawSymbol === X_PLAYER) {
+        const p = drawPhase.current;
+        let tx, tz;
+        if (p <= 0.5) {
+          const t = p / 0.5;
+          tx = cx + (-DRAW_S + 2 * DRAW_S * t);
+          tz = cz + (-DRAW_S + 2 * DRAW_S * t);
+        } else {
+          const t = (p - 0.5) / 0.5;
+          tx = cx + (DRAW_S - 2 * DRAW_S * t);
+          tz = cz + (-DRAW_S + 2 * DRAW_S * t);
+        }
+        desiredTarget.current.set(tx, drawY, tz);
+      } else {
+        // O: trace a full circle around cell centre
+        const angle = drawPhase.current * Math.PI * 2;
+        desiredTarget.current.set(
+          cx + Math.cos(angle) * DRAW_R,
+          drawY,
+          cz + Math.sin(angle) * DRAW_R
+        );
+      }
+    }
+
+    // Lerp faster during drawing so arm tracks the path closely
+    const lerpSpeed = isDrawing ? Math.min(1, delta * 5) : Math.min(1, delta * 1.8);
+    currentTarget.current.lerp(desiredTarget.current, lerpSpeed);
     const target = currentTarget.current;
 
     const dx = target.x - ARM_BASE.x;
@@ -178,9 +247,9 @@ function RobotArm3D({ targetCell, isMoving }) {
     cosShoulder = Math.max(-1, Math.min(1, cosShoulder));
     const shoulderAngle = angle2target + Math.acos(cosShoulder);
 
-    const lerpSpeed = Math.min(1, delta * 2);
-    currentShoulder.current += (shoulderAngle - currentShoulder.current) * lerpSpeed;
-    currentElbow.current    += (elbowAngle    - currentElbow.current)    * lerpSpeed;
+    const ikLerpSpeed = Math.min(1, delta * 2);
+    currentShoulder.current += (shoulderAngle - currentShoulder.current) * ikLerpSpeed;
+    currentElbow.current    += (elbowAngle    - currentElbow.current)    * ikLerpSpeed;
   });
 
   const baseMat = useMemo(() => new THREE.MeshStandardMaterial({
@@ -482,7 +551,7 @@ function CameraRig() {
 // ── Main Scene ──────────────────────────────────────────────
 export default function Scene3D({
   board, winLine, onCellClick, currentPlayer, gameResult,
-  robotTarget, isArmMoving, isScanning, showVision, hoverEnabled
+  robotTarget, isArmMoving, isDrawing, drawSymbol, isScanning, showVision, hoverEnabled
 }) {
   return (
     <Canvas
@@ -528,7 +597,7 @@ export default function Scene3D({
         hoverEnabled={hoverEnabled}
       />
 
-      <RobotArm3D targetCell={robotTarget} isMoving={isArmMoving} />
+      <RobotArm3D targetCell={robotTarget} isMoving={isArmMoving} isDrawing={isDrawing} drawSymbol={drawSymbol} />
 
       {showVision && <VisionScan active={isScanning} />}
     </Canvas>
